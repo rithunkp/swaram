@@ -1,7 +1,7 @@
 # PROJECT_STATE.md — Swaram
 
 > Source of truth for every coding agent. **Read it fully before coding. Update it before you finish.**
-> Last updated: 2026-10-09 · Status: Phase 1 implemented; Phase 2 integration in progress · Version: 5
+> Last updated: 2026-10-09 · Status: Core implemented; external supervisor implemented for review · Version: 9
 
 ---
 
@@ -27,7 +27,7 @@ Status legend: `todo` · `wip` · `blocked` · `review` · `done`
 | Project | **Swaram** (Malayalam: voice) · repo `swaram` |
 | One line | Upload contacts, pick a template, calls go out in each person's language, replies are understood, dashboard shows who confirmed, one click retries the rest |
 | Event / track | DEFINE 4.0 · PR 002 (Software) |
-| Voice | **ElevenLabs** Agents (speech, LLM turn-taking, TTS) over a Twilio number or SIP trunk (Exotel SIP if we get access) |
+| Voice | **ElevenLabs** Agents (speech, LLM turn-taking, TTS) over a Twilio or Exotel number |
 | Pitch | "One platform, any template, any language, with privacy built in." |
 
 ---
@@ -61,7 +61,7 @@ flowchart TD
 
 | Part | How |
 |---|---|
-| Script per language | AI (Claude) |
+| Script per language | Optional open-weight model through Hugging Face Inference Providers; reviewed by organizer |
 | Understanding spoken replies | AI (ElevenLabs agent: STT + LLM) |
 | Call flow, retries, grouping, consent, call hours, privacy | Plain code |
 
@@ -73,40 +73,42 @@ flowchart TD
 
 **Phase 2 (live calling):** ElevenLabs calls in en/hi/ml · speech reply and keypad verification · voicemail/no-answer reconciliation · per-language accuracy and latency numbers. Requires provider configuration and consented test numbers.
 
+**External supervision (approved):** A separate supervisor service observes privacy-minimized campaign snapshots, analyzes outcomes by language and segment, recommends bounded retries, and opens a human review queue for uncertain or exhausted cases. It does not join calls or directly edit scripts/outcomes. Automatic retries are opt-in and remain subject to Swaram's call window, opt-out, consent, and `MAX_ATTEMPTS` rules. Script approval stays with a human in the core dashboard.
+
 **Stretch (in order):** Follow-up campaign (reminder/update to confirmed) · call detail drawer with transcript and outcome ("agent trace") · payment-reminder template · Tamil · cost/minutes per campaign · browser "call me" fallback · WhatsApp fallback.
 
-**Parked (do NOT build unless the lead moves it up):** Temporal/workflow engine · Redis · MinIO · pgvector/semantic search · RLS/multi-tenant · Presidio · bandit/smart retry timing · waitlist promotion · event versioning/diffing · CRM connectors · live takeover/monitoring · LLM insights panel · contact memory · self-hosted STT/TTS · LiveKit.
+**Parked (do NOT build unless the lead moves it up):** Temporal/workflow engine · Redis · MinIO · pgvector/semantic search · RLS/multi-tenant · Presidio · bandit/smart retry timing · waitlist promotion · event versioning/diffing · CRM connectors · live takeover/monitoring · contact memory · self-hosted STT/TTS · LiveKit.
 
 ---
 
 ## 4. Architecture and stack
 
 ```
-Next.js dashboard ──REST (poll 3s)──> FastAPI ──> SQLite (SQLAlchemy)
-                                         │
-                         dialer loop (asyncio task in the API process)
-                                         │
-                                  VoiceProvider adapter
-                          ┌──────────────┼───────────────┐
-                  ElevenLabsProvider   MockProvider   BrowserProvider (stretch)
-                          │
-              ElevenLabs Agent ── Twilio number | SIP trunk ── phone
-                          │
-        during call: POST /voice/tools/record_outcome
-        after call:  POST /webhooks/elevenlabs
+Organizer ──> Next.js dashboard ──REST──> Swaram API ──> Swaram SQLite
+                    │                         │
+                    │                         └── asyncio dialer ──> VoiceProvider
+                    │                                                   │
+                    │                                  ElevenLabs Agent ──> phone
+                    │                                  record_outcome + webhook
+                    │
+                    └──REST──> External Supervisor API ──> Supervisor SQLite
+                                    │
+                                    ├── GET minimized snapshot (Bearer token) ──> Swaram API
+                                    └── POST bounded retry (opt-in token) ──────> Swaram API
 ```
 
 | Layer | Choice |
 |---|---|
 | Backend | Python 3.12, FastAPI, Pydantic v2, SQLAlchemy 2, httpx, tenacity |
+| External supervisor | Separate FastAPI process, read-only snapshot client, independent SQLite review store |
 | DB | SQLite file (single container). Swap to Postgres only if concurrency demands |
 | Jobs | One asyncio dialer loop + semaphore. No external queue |
 | Live updates | Dashboard polls every 3 s |
 | Frontend | Next.js 15, TypeScript, Tailwind, shadcn/ui, TanStack Query, Recharts |
 | Voice | ElevenLabs Agents + Scribe STT + TTS (`eleven_flash_v2_5` default; `eleven_v3` where a language needs it, likely Malayalam **(verify)**) |
-| LLM | Claude via Anthropic API: `claude-sonnet-5-5` for scripts |
+| LLM | Optional Hugging Face Inference Providers chat API for draft scripts and aggregate supervisor insights; configured with a fine-grained inference token and model ID |
 | Privacy | `cryptography` Fernet for name/phone, HMAC phone hash, regex redaction |
-| Dev/CI | uv, ruff, mypy, pytest, pnpm, Docker Compose (api + web), GitHub Actions |
+| Dev/CI | uv, ruff, mypy, pytest, pnpm, Docker Compose (api + web + supervisor), GitHub Actions |
 
 Language notes **(verify in T-04 bake-off)**: Scribe v2 Realtime lists Hindi, Tamil, Malayalam among 90+ languages; Flash v2.5 lists Hindi and Tamil; Malayalam appears in the Eleven v3 list.
 
@@ -122,7 +124,8 @@ swaram/
 │   │        /routers/{campaigns,templates,summary,webhooks,tools}.py
 │   │        /services/{scripts,dialer,outcomes,privacy,csv_import}.py
 │   │        /providers/{base.py,elevenlabs.py,mock.py}
-│   └── web/{Dockerfile,package.json} app/{campaigns/,components/,lib/,layout.tsx,globals.css}
+│   ├── supervisor/{Dockerfile,pyproject.toml} app/{main.py,analysis.py,store.py}
+│   └── web/{Dockerfile,package.json} app/{campaigns/,supervisor/,components/,lib/,layout.tsx,globals.css}
 ├── templates/            # future provider prompt and template files
 ├── evals/                # lang_eval.py, golden utterances
 ├── scripts/              # seed_demo.py, simulate.py
@@ -139,6 +142,9 @@ swaram/
 | `scripts` | campaign_id, language, first_message, voicemail_message, key_points, approved |
 | `contacts` | id, campaign_id, name_enc, phone_enc, phone_hash, language, segment, opted_out |
 | `calls` | id, contact_id, campaign_id, attempt_no, state, outcome, conversation_id, input_mode(speech/keypad), duration_s, transcript_redacted, recording_expires_at, started_at, ended_at |
+| `demo_rsvp_calls` | id, batch_id, scenario, normalized outcome from ElevenLabs `record_outcome`, exact simulated participant response, redacted transcript, provider, test/invocation IDs, extraction status, created_at |
+| `demo_rsvp_runs` | id, status, ElevenLabs invocation ID, error, created_at, finished_at |
+| `demo_rsvp_tests` | scenario, organizer agent ID, reusable ElevenLabs simulation test ID |
 
 `calls.state`: `queued → dialing → done | failed`
 `calls.outcome`: `confirmed | declined | maybe | callback | optout | no_answer | voicemail | failed`
@@ -153,17 +159,24 @@ Non-responders = latest outcome in `{no_answer, voicemail, failed}`. Max attempt
 | Endpoint | Purpose |
 |---|---|
 | `GET /templates` | list templates (id, name, fields, allowed outcomes) |
-| `POST /campaigns` (multipart: csv, template_id, fields, languages) | import contacts, generate scripts, status `draft` |
+| `POST /campaigns` (multipart: csv, template_id, fields, languages) | validate template fields and contacts, create language scripts, status `draft` |
 | `GET /campaigns`, `GET /campaigns/{id}` | list / detail with scripts |
 | `PATCH /campaigns/{id}/scripts/{lang}` | edit script text |
-| `POST /campaigns/{id}/approve` | approve all scripts → `ready` |
-| `POST /campaigns/{id}/launch` | queue first attempt per contact → `running` |
-| `POST /campaigns/{id}/retry` | queue next attempt for non-responders (respects `MAX_ATTEMPTS`) |
+| `POST /campaigns/{id}/approve` | draft only: approve all scripts → `ready` |
+| `POST /campaigns/{id}/launch` | ready only: queue first attempt per contact → `running` |
+| `POST /campaigns/{id}/retry` | completed campaign only: queue eligible latest non-responder attempts (respects `MAX_ATTEMPTS`) |
 | `POST /campaigns/{id}/followup` `{template_id, fields, audience}` | new campaign cloned from contacts matching `confirmed|declined|non_responders|all` (stretch) |
-| `GET /campaigns/{id}/summary` | counts by outcome × language, outcome × segment, totals |
+| `GET /campaigns/{id}/summary` | counts by outcome × language and segment, totals, and eligible retryable-contact count |
 | `GET /campaigns/{id}/calls` | masked list (name initial + `+91•••••1234`, outcome, language, attempt) |
+| `POST /demo/rsvp/runs` | start three ElevenLabs Agent Testing simulations with Yes, No, and unsure simulated-user personas; never dials a number |
+| `GET /demo/rsvp/runs/{run_id}` | poll run status and retrieve the resulting ElevenLabs transcript/outcome records |
+| `GET /demo/rsvp/calls` | list persisted ElevenLabs RSVP simulations with exact participant replies and tool-extracted outcomes |
+| `GET /demo/rsvp/calls.csv` | export persisted ElevenLabs RSVP simulations as CSV |
 | `GET /calls/{id}` | redacted transcript + outcome + input mode (stretch drawer) |
 | `DELETE /campaigns/{id}` | erase contacts, calls, transcripts, recordings |
+| `GET /supervision/snapshot` | token-protected, minimized campaign/scripts/call status snapshot for the separate supervisor; no names, phones, or transcripts |
+| `POST /supervision/campaigns/{id}/retry` | token-protected bounded retry request from supervisor; available only when `SUPERVISOR_AUTO_RETRY=true` |
+| `PATCH /calls/{id}/outcome` | human corrects a completed call outcome from the campaign review view; opt-out cannot be reversed |
 
 ### 7.2 Voice provider
 
@@ -189,7 +202,7 @@ class CallRequest(BaseModel):
 
 | Need | Mechanism |
 |---|---|
-| Place call | Outbound call endpoint for Twilio (`/v1/convai/twilio/...`) or SIP trunk `POST /v1/convai/sip-trunk/outbound-call`; optional `telephony_call_config.ringing_timeout_secs` |
+| Place call | Native outbound endpoint selected by `TELEPHONY_KIND`: Twilio (`/v1/convai/twilio/outbound-call`) or Exotel (`/v1/convai/exotel/outbound-call`) |
 | Per-call content | `conversation_initiation_client_data`: `dynamic_variables` + `conversation_config_override` (first_message, language, prompt). Enable overrides in the agent's security settings |
 | Capture answer | Server (webhook) tool `record_outcome` |
 | Voicemail | Voicemail-detection system tool if available, else prompt rule + end-call tool |
@@ -210,7 +223,13 @@ Idempotent per `call_id`. `optout` sets `contacts.opted_out`. Response `{ "ok": 
 
 ### 7.5 Webhook `POST /webhooks/elevenlabs`
 
-Verify signature → map `conversation_id` to `call` (via `call_id` dynamic variable) → if no outcome yet: `no_answer` / `voicemail` / `failed` from call result → redact and store transcript → set `duration_s`, `ended_at`, `state=done`. Dedupe on `(conversation_id, event type)`.
+Verify signature and accept `post_call_transcription` and `call_initiation_failure`. Map `conversation_id` to `call`; initiation failures become retryable `no_answer` or `failed` outcomes. For post-call transcription, preserve an outcome already captured by `record_outcome`; otherwise map no-answer/voicemail from the provider result or use retryable `failed`. Redact and store transcript, duration, and end time. Dedupe repeated deliveries by conversation and event type.
+
+### 7.7 External supervisor
+
+The separate supervisor service polls `GET /supervision/snapshot` with a shared bearer token. The snapshot includes campaign/script approval states and per-call opaque IDs, attempt, state, outcome, language, segment, opt-out flag, and duration; it excludes contact names, phone numbers, and transcripts. The supervisor stores snapshots and review items in its own database and has no Swaram database access.
+
+The supervisor opens a human review item immediately for completed `maybe`/`callback` outcomes and when a contact remains unresolved (`no_answer`, `voicemail`, or `failed`) at `MAX_ATTEMPTS`. A reviewer can open the exact campaign call, inspect its redacted transcript, and correct the outcome in Swaram; opt-out cannot be reversed. It recommends retries for eligible non-responders. Automatic retry is disabled by default; when explicitly enabled, it can only call the bounded Swaram retry endpoint, which rechecks eligibility and relies on the existing queue for call hours and opt-outs. Optional LLM analysis receives aggregate metrics only; deterministic rules own review classification and retry eligibility.
 
 ### 7.6 Template file (`templates/<id>.yaml`)
 
@@ -231,7 +250,7 @@ Ship `workshop_invite` and `clinic_reminder` (outcomes: confirmed, reschedule→
 ## 8. Voice and dialer
 
 ### 8.1 Dialer loop (`services/dialer.py`)
-Every 2 s: take `queued` calls from `running` campaigns, only inside calling hours (`CALL_WINDOW`, default 09:00–20:00 IST), skip `opted_out`, run up to `MAX_CONCURRENT` at once, call `provider.start_call`, mark `dialing`. Calls stuck in `dialing` longer than `CALL_TIMEOUT_S` are reconciled via `get_conversation`, else `failed`. Provider/network errors retry with backoff (tenacity), then `failed`.
+The queue polls every 2 s while a campaign has queued or dialing calls and resumes campaigns marked `running` after API startup. For live calls, it only starts queued calls inside `CALL_WINDOW` (default 09:00–20:00 IST), skips `opted_out`, and limits total active calls to `MAX_CONCURRENT`; simulated calls bypass the time window. Calls stuck in `dialing` longer than `CALL_TIMEOUT_S` are reconciled via `get_conversation`; active provider calls remain dialing, terminal results are saved, and unknown/error results become retryable `failed` outcomes. A failed outbound-call request is marked failed for explicit review/retry rather than blindly repeating a request that might already have connected the call.
 
 ### 8.2 Why this voice design (pitch)
 Scripted facts (date, venue, time) are injected verbatim from the approved script; the agent LLM only interprets replies and answers simple questions from `key_points`. Cheap, no hallucinated details, still conversational. Speech and keypad both accepted; voicemail and no-answer are explicit outcomes and retryable.
@@ -251,9 +270,9 @@ No phone line at demo → `MockProvider` for dashboards + one pre-recorded real 
 ## 9. AI pieces
 
 ### 9.1 Script generator (`services/scripts.py`)
-Input: template + filled fields + languages. Output (JSON, schema-validated) per language:
+Input: template + filled fields + one language. Output is schema-validated:
 `{"first_message": "...", "voicemail_message": "...", "key_points": "..."}`.
-Rules in the prompt: keep all field values verbatim; ≤2 short sentences before the question; polite register; voicemail ≤20 s and includes a callback instruction. Validator rejects output if any field value is missing from `first_message` (fact-preservation). One retry on failure.
+`SCRIPT_PROVIDER_MODE=mock` is the default and uses the local mock generator. `SCRIPT_PROVIDER_MODE=huggingface` uses `HF_TOKEN` and `HF_MODEL` through the Hugging Face Inference Providers chat-completion router (default model: `Qwen/Qwen3.8-27B:fastest`). Send only template text, language, and campaign field values; never contact data. Require valid JSON, concise polite copy, no invented facts, and approved source facts in the key points. A human reviews the draft before approval.
 
 ### 9.2 Voice agent prompt (`templates/agent_prompt.md`)
 
@@ -294,7 +313,7 @@ Clean and polished matters (judges see this first). Loading skeletons, empty sta
 | Erase | `DELETE /campaigns/{id}` |
 | Data-flow slide (`docs/data-flow.md`) | Where voice, language and data processing happen |
 
-**Honest data flow (use exactly this):** call audio and live conversation text are processed by ElevenLabs (speech recognition, LLM, speech synthesis) and the telephony provider; we check and state the data-residency / zero-retention settings of our plan. Contacts, transcripts and recordings are stored on our own server, encrypted. Script generation sends only template text and field values (no contact data) to Claude. Do **not** claim audio stays on our infrastructure. Future work: self-hosted speech stack.
+**Honest data flow:** call audio and live conversation text are processed by ElevenLabs (speech recognition, LLM, speech synthesis) and the telephony provider; we check and state the data-residency / zero-retention settings of our plan. Contacts, transcripts and recordings are stored on our own server, encrypted. If Hugging Face script generation is enabled, it receives template text and campaign field values only, never contact data. Do **not** claim audio stays on our infrastructure. Future work: self-hosted speech stack.
 
 ---
 
@@ -324,20 +343,24 @@ Handoff note (PR description): `Task · From→To · Delivered · Contract touch
 | T-02 | Models, SQLite, privacy service (encrypt, mask, redact, purge) | backend | T-01 | review |
 | T-03 | Templates loader + CSV import (validate E.164, dedupe, encrypt) | backend | T-02 | review |
 | T-04 | Language bake-off (en/hi/ml/ta): TTS model, voice, latency, accuracy | voice | ElevenLabs key + consented test numbers | blocked |
-| T-05 | Mock script generation + `POST /campaigns`, edit, approve | backend | T-03 | review |
+| T-05 | Mock/Hugging Face script generation + `POST /campaigns`, edit, approve | backend | T-03 | review |
 | T-06 | `VoiceProvider` protocol + `MockProvider` + simulator | backend | T-02 | review |
-| T-07 | Mock launch/retry queue with opt-out, concurrency, and attempt limits | backend | T-06 | review |
+| T-07 | Launch/retry queue with opt-out, call window, active-call concurrency, timeout reconciliation, and attempt limits | backend | T-06 | review |
 | T-08 | `ElevenLabsProvider`: agent config, outbound call, overrides, webhook verify, tool endpoint | voice | T-06, number | wip |
 | T-09 | Summary/calls endpoints | backend | T-07 | review |
 | T-10 | App shell + campaign list + create wizard | frontend | T-01 | review |
 | T-11 | Campaign page: cards, language chart, segment table, retry | frontend | T-09 | review |
 | T-12 | Script preview/edit UI | frontend | T-05 | review |
 | T-13 | `docs/data-flow.md` + privacy slide | lead | T-02 | review |
-| T-14 | Accuracy table per language (`evals/lang_eval.py`) | qa | T-08 | todo |
+| T-14 | Accuracy table per language (`evals/lang_eval.py`) | qa | T-08 | blocked |
 | T-15 | Demo rehearsal, seed data, runbook | qa | T-11 | wip |
+| T-16 | External supervisor API, minimized snapshot, analytics, review queue | supervisor | T-07, T-09 | review |
+| T-17 | Supervisor dashboard and human review actions | frontend | T-16 | review |
+| T-18 | Guarded optional retry orchestration and operator runbook | supervisor | T-16 | review |
 | S-01 | Follow-up campaign (reminder/update to confirmed) | backend+frontend | T-09 | todo |
 | S-02 | Call detail drawer (transcript + outcome) | frontend | T-09 | todo |
 | S-03 | Payment-reminder template, Tamil, cost/minutes | backend | T-08 | todo |
+| D-01 | ElevenLabs hackathon RSVP simulation: organizer agent + AI participant personas for yes/no/unsure, persisted transcripts and CSV export | frontend+backend | T-01 | done |
 
 Phase 1 critical path: T-01 → T-02 → T-06 → T-07 → T-09 → T-11 → T-15. Phase 2 starts with T-04 and then T-08 when provider credentials and consented numbers are available.
 Cut order if late: S-03 → S-02 → S-01 → Tamil. Never cut: real call demo, outcome capture, voicemail/no-answer + retry, dashboard by language, privacy slide.
@@ -353,8 +376,16 @@ Cut order if late: S-03 → S-02 → S-01 → Tamil. Never cut: real call demo, 
 | `FERNET_KEY`, `HMAC_PHONE_KEY` | encryption + phone hash |
 | `ELEVENLABS_API_KEY`, `ELEVENLABS_AGENT_ID`, `ELEVENLABS_PHONE_NUMBER_ID` | voice |
 | `ELEVENLABS_WEBHOOK_SECRET`, `TOOL_SECRET` | webhook + tool auth |
-| `TELEPHONY_KIND` | `twilio` \| `sip` |
-| `ANTHROPIC_API_KEY` | scripts |
+| `TELEPHONY_KIND` | `twilio` \| `exotel`; must match the imported ElevenLabs number |
+| `HF_TOKEN` | optional Hugging Face Inference Providers token for scripts and supervisor insights |
+| `HF_MODEL` | default model ID `Qwen/Qwen3.8-27B:fastest` |
+| `SCRIPT_PROVIDER_MODE` | `mock` \| `huggingface` (default `mock`) |
+| `SUPERVISOR_READ_TOKEN` | Shared token for the minimized read-only snapshot endpoint |
+| `SUPERVISOR_ACTION_TOKEN` | Shared token for the bounded supervisor retry endpoint |
+| `SUPERVISOR_AUTO_RETRY` | `false` by default; explicitly enable bounded supervisor retries |
+| `SUPERVISOR_API_URL` | Supervisor service URL, default `http://localhost:8100` |
+| `SUPERVISOR_ANALYSIS_MODE` | `rules` default or `huggingface` aggregate analysis |
+| `SUPERVISOR_MODEL` | optional model override; defaults to `HF_MODEL` |
 | `PUBLIC_BASE_URL` | webhook/tool base (tunnel in dev) |
 | `MAX_CONCURRENT`, `MAX_ATTEMPTS`, `CALL_TIMEOUT_S`, `CALL_WINDOW`, `RETENTION_DAYS` | behaviour |
 
@@ -365,6 +396,7 @@ uv run --directory apps/api --extra dev -- ruff check app tests
 uv run --directory apps/api --extra dev -- mypy app
 pnpm --dir apps/web dev
 docker compose exec api python -m app.seed_demo
+uv run --directory apps/supervisor uvicorn app.main:app --reload --port 8100
 python scripts/simulate.py --campaign <campaign-id> --n 200
 python -m evals.lang_eval --langs en,hi,ml
 cloudflared tunnel --url http://localhost:8000
@@ -374,12 +406,13 @@ cloudflared tunnel --url http://localhost:8000
 
 ## 15. Demo (3–4 min) and acceptance
 
-1. Open the seeded workshop campaign; show scripts in ml/hi/en.
-2. Create a campaign, import CSV contacts, preview/edit scripts, and approve.
-3. Simulate calls and show dashboard totals by language and segment.
-4. Retry non-responders and show attempt counts.
-5. Swap to the clinic-reminder template to show reuse.
-6. Explain the phase-1 mock data flow and phase-2 live voice data flow.
+1. Run the three ElevenLabs RSVP simulations; inspect tool-extracted outcomes and export the CSV.
+2. Open the seeded workshop campaign; show scripts in ml/hi/en.
+3. Create a campaign, import CSV contacts, preview/edit scripts, and approve.
+4. Simulate calls and show dashboard totals by language and segment.
+5. Retry non-responders and show attempt counts.
+6. Swap to the clinic-reminder template to show reuse.
+7. Explain the phase-1 mock data flow and phase-2 live voice data flow.
 
 Phase 1 acceptance: mock run of 200 contacts fills the dashboard; CSV validation, phone masking, encryption, opt-out, retry limits, and campaign erasure are covered. Phase 2 acceptance: ≥1 consented real call each in en/hi/ml and an accuracy/latency table per language; no phone numbers in logs (grep test). Provider adapter and signed endpoints are implemented; live acceptance remains blocked until credentials, agent, imported number, and consented test contacts are configured.
 
@@ -398,6 +431,7 @@ Phase 1 acceptance: mock run of 200 contacts fills the dashboard; CSV validation
 | D6 | Outcome captured by `record_outcome` tool; webhook is the safety net |
 | D7 | Honest data-flow statement (§11); no "audio stays local" claim |
 | D8 | Name: Swaram |
+| D9 | RSVP demo runs the configured ElevenLabs organizer agent against ElevenLabs Agent Testing's AI-simulated participant for yes/no/unsure; it uses `record_outcome` for labels, stores the exact participant reply, and never calls telephony. |
 
 **Risks**
 | ID | Risk | Mitigation |
@@ -421,3 +455,10 @@ Phase 1 acceptance: mock run of 200 contacts fills the dashboard; CSV validation
 | 2026-10-09 | lead | v4: implemented phase-1 campaign workflow, encrypted SQLite contacts, mock scripts/provider, simulation/retry dashboard, seed demo, privacy/data-flow notes; real calling is phase 2 |
 | 2026-10-09 | lead | Source syntax, Compose config, and JSON manifests checked. Runtime tests/build pending because PyPI and npm registry connections are blocked in the current environment; phase-1 tasks marked review |
 | 2026-10-09 | lead | v5: added ElevenLabs native Twilio outbound adapter with language/prompt overrides, persistent conversation IDs, authenticated outcome tool, signed post-call webhook handling, live-calling setup and data-flow docs; default stays mock |
+| 2026-10-09 | lead | v6: hardened the core queue to enforce IST calling hours for live calls, cap active live calls, resume running campaigns after API restart, reconcile timed-out calls, handle call-initiation failure webhooks, expose accurate retryable counts, enforce campaign state transitions and template fields, and make the dashboard reflect provider mode with live-call confirmation; supervisor agent remains deferred |
+| 2026-10-09 | lead | v7: added optional mock-first/Anthropic script generation without contact data, idempotent provider webhook receipts, clearer live/mock launch behavior, and updated setup notes; external supervisor remains deferred; live language accuracy acceptance is blocked pending provider credentials and consented test numbers |
+| 2026-10-09 | lead | v8: approved a separate external supervisor service with minimized read-only snapshots, deterministic campaign analysis, human review cases, aggregate-only optional LLM analysis, and opt-in bounded retry orchestration |
+| 2026-10-09 | lead | v9: implemented the separate supervisor API/service and review database, aggregate campaign analysis with optional Anthropic insights, human review dashboard, call deep links, minimized authenticated snapshots, and guarded opt-in auto-retries; test execution remains pending |
+| 2026-10-09 | lead | v10: replaced optional Anthropic integrations with Hugging Face Inference Providers using Qwen3.8-27B for campaign script drafts and aggregate supervisor insights; mock generation and deterministic supervisor rules remain defaults |
+| 2026-10-09 | Codex | Added contract and task for the synthetic hackathon RSVP simulation and export. |
+| 2026-10-09 | Codex | Replaced the scripted RSVP demo with ElevenLabs Agent Testing simulations, scenario personas, `record_outcome` extraction, persisted transcripts, and CSV export; no phone calls are placed. |

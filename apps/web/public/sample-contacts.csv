@@ -1,7 +1,6 @@
-name,phone,language,segment,opted_out
-Anjali,+910000000001,ml,Designers,false
-Arjun,+910000000002,en,Organizers,false
-Meera,+910000000003,hi,Designers,false
-Dev,+910000000004,en,Students,false
-Fathima,+910000000005,ml,Students,false
-Ravi,+910000000006,hi,Organizers,false
+user_id,name,phone,language,segment
+SW-1001,Aisha Raman,"+12125550101",en,Students
+SW-1002,Arjun Nair,"+12125550102",hi,Organizers
+SW-1003,Meera Pillai,"+12125550103",ml,Designers
+SW-1004,Dev Menon,"+12125550104",en,Organizers
+SW-1005,Fathima Noor,"+12125550105",hi,Students

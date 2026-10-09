@@ -5,7 +5,8 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.main import Campaign, Call, Contact, Script, engine, initialize, phone_hash, script_copy, seal
+from app.main import Campaign, Call, Contact, Script, engine, initialize, phone_hash, seal
+from app.services.scripts import script_copy
 
 
 def main() -> None:

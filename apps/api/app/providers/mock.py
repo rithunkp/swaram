@@ -24,3 +24,6 @@ class MockProvider:
 
     def verify_webhook(self, headers: Mapping[str, str], body: bytes) -> bool:
         return False
+
+    async def close(self) -> None:
+        return None

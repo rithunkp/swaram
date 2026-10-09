@@ -15,12 +15,48 @@ services:
   web:
     build:
       context: ./apps/web
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+        NEXT_PUBLIC_SUPERVISOR_API_URL: ${SUPERVISOR_API_URL:-http://localhost:8100}
+        NEXT_PUBLIC_ELEVENLABS_AGENT_ID: ${ELEVENLABS_AGENT_ID:-}
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      NEXT_PUBLIC_SUPERVISOR_API_URL: ${SUPERVISOR_API_URL:-http://localhost:8100}
+      NEXT_PUBLIC_ELEVENLABS_AGENT_ID: ${ELEVENLABS_AGENT_ID:-}
     ports:
       - "3000:3000"
     depends_on:
       api:
         condition: service_healthy
+      supervisor:
+        condition: service_started
+  supervisor:
+    build:
+      context: ./apps/supervisor
+    environment:
+      SWARAM_API_URL: http://api:8000
+      SUPERVISOR_READ_TOKEN: ${SUPERVISOR_READ_TOKEN:-}
+      SUPERVISOR_ACTION_TOKEN: ${SUPERVISOR_ACTION_TOKEN:-}
+      SUPERVISOR_AUTO_RETRY: ${SUPERVISOR_AUTO_RETRY:-false}
+      SUPERVISOR_ANALYSIS_MODE: ${SUPERVISOR_ANALYSIS_MODE:-rules}
+      SUPERVISOR_MODEL: ${SUPERVISOR_MODEL:-}
+      HF_MODEL: ${HF_MODEL:-Qwen/Qwen3.8-27B:fastest}
+      HF_TOKEN: ${HF_TOKEN:-}
+      SUPERVISOR_POLL_INTERVAL_S: ${SUPERVISOR_POLL_INTERVAL_S:-15}
+      MAX_ATTEMPTS: ${MAX_ATTEMPTS:-3}
+      SUPERVISOR_DATABASE_PATH: /app/data/supervisor.db
+    ports:
+      - "127.0.0.1:8100:8100"
+    volumes:
+      - supervisor-data:/app/data
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 volumes:
   swaram-data:
+  supervisor-data:
