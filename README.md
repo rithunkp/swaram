@@ -13,7 +13,7 @@ The official project submission repository for **DEFINE 4.0 — The World's Real
 ## Team Information
 
 - **Team Name**: Sector 21
-- **Track**: PR 002 — Multilingual Outbound Calling Campaigns (Software)
+- **Track**: PR 002 (Software)
 
 ## Team Members
 
