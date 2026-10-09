@@ -1,7 +1,7 @@
 # PROJECT_STATE.md — Swaram
 
 > Source of truth for every coding agent. **Read it fully before coding. Update it before you finish.**
-> Last updated: 2026-10-09 · Status: scaffolded · Version: 3
+> Last updated: 2026-10-09 · Status: Phase 1 implemented; Phase 2 integration in progress · Version: 5
 
 ---
 
@@ -14,6 +14,7 @@
 5. Minimal code, no explanatory comments. Typed (mypy / TS strict).
 6. ElevenLabs names in this file are from docs search and memory, marked **(verify)**. Check `https://elevenlabs.io/docs/llms.txt` (append `.md` to any docs URL) before coding against them.
 7. Stay in your owned directories (§12). Update §13 (tasks) and §16 (changelog) in the same PR.
+8. Do not edit `README.md` in future work. Treat it as user-owned; put project setup and implementation guidance in this file or other appropriate docs unless the user explicitly asks to change the README.
 
 Status legend: `todo` · `wip` · `blocked` · `review` · `done`
 
@@ -68,7 +69,9 @@ flowchart TD
 
 ## 3. Scope
 
-**MVP (must demo):** campaign creation + CSV import · script generation with preview/approve · real calls in en/hi/ml via ElevenLabs · speech reply + keypad reply · voicemail + no-answer handling · dashboard by language/segment with retry · two templates (workshop invite, clinic reminder) · privacy basics (§11) · per-language accuracy numbers · mock mode + simulator.
+**Phase 1 (showable demo):** campaign creation + CSV import · mock script generation with preview/approve · simulated outcomes in en/hi/ml · dashboard by language/segment with retry · two templates (workshop invite, clinic reminder) · privacy basics (§11) · mock mode + simulator. No outbound calls are placed.
+
+**Phase 2 (live calling):** ElevenLabs calls in en/hi/ml · speech reply and keypad verification · voicemail/no-answer reconciliation · per-language accuracy and latency numbers. Requires provider configuration and consented test numbers.
 
 **Stretch (in order):** Follow-up campaign (reminder/update to confirmed) · call detail drawer with transcript and outcome ("agent trace") · payment-reminder template · Tamil · cost/minutes per campaign · browser "call me" fallback · WhatsApp fallback.
 
@@ -115,15 +118,15 @@ Language notes **(verify in T-04 bake-off)**: Scribe v2 Realtime lists Hindi, Ta
 swaram/
 ├── PROJECT_STATE.md  docker-compose.yml  .env.example  .github/workflows/ci.yml
 ├── apps/
-│   ├── api/{Dockerfile,pyproject.toml} app/{main.py,settings.py,db.py,models.py,schemas.py}
+│   ├── api/{Dockerfile,pyproject.toml} app/{main.py,seed_demo.py} app/providers/{base.py,mock.py} tests/
 │   │        /routers/{campaigns,templates,summary,webhooks,tools}.py
 │   │        /services/{scripts,dialer,outcomes,privacy,csv_import}.py
 │   │        /providers/{base.py,elevenlabs.py,mock.py}
-│   └── web/{Dockerfile,package.json} app/{page.tsx,layout.tsx,globals.css}
-├── templates/            # one YAML per template + agent prompt
+│   └── web/{Dockerfile,package.json} app/{campaigns/,components/,lib/,layout.tsx,globals.css}
+├── templates/            # future provider prompt and template files
 ├── evals/                # lang_eval.py, golden utterances
 ├── scripts/              # seed_demo.py, simulate.py
-└── docs/                 # data-flow.md, pitch.md
+└── docs/                 # data-flow.md, demo-runbook.md
 ```
 
 ---
@@ -309,7 +312,7 @@ Pattern: lead slices tasks → specialists work in parallel on disjoint folders 
 
 Handoff note (PR description): `Task · From→To · Delivered · Contract touched · How to verify · Open issues`.
 
-**Definition of done:** runs in mock mode · mypy/tsc/ruff clean · tests added · no PII/secrets in logs · `.env.example` updated · §7 updated if a contract changed · §13 and §16 updated.
+**Definition of done:** phase-1 workflow runs in mock mode · mypy/tsc/ruff clean · workflow/privacy tests pass · no PII/secrets in logs · `.env.example` updated · §7 updated if a contract changed · §13 and §16 updated. Do not edit README.md unless explicitly asked.
 
 ---
 
@@ -318,25 +321,25 @@ Handoff note (PR description): `Task · From→To · Delivered · Contract touch
 | ID | Task | Owner | Deps | Status |
 |---|---|---|---|---|
 | T-01 | Scaffold repo, compose (api+web), `.env.example`, CI | lead | — | done |
-| T-02 | Models, SQLite, privacy service (encrypt, mask, redact, purge) | backend | T-01 | todo |
-| T-03 | Templates loader + CSV import (validate E.164, dedupe, encrypt) | backend | T-02 | todo |
-| T-04 | Language bake-off (en/hi/ml/ta): TTS model, voice, latency, accuracy | voice | ElevenLabs key | todo |
-| T-05 | Script generator + validator + `POST /campaigns`, edit, approve | backend | T-03 | todo |
-| T-06 | `VoiceProvider` base + `MockProvider` + simulator | backend | T-02 | todo |
-| T-07 | Dialer loop (hours, concurrency, opt-out, timeout reconcile) + launch/retry | backend | T-06 | todo |
-| T-08 | `ElevenLabsProvider`: agent config, outbound call, overrides, webhook verify, tool endpoint | voice | T-04, T-06, number | todo |
-| T-09 | Summary/calls endpoints | backend | T-07 | todo |
-| T-10 | App shell + campaign list + create wizard | frontend | T-01 | todo |
-| T-11 | Campaign page: cards, language chart, segment table, retry | frontend | T-09 | todo |
-| T-12 | Script preview/edit UI | frontend | T-05 | todo |
-| T-13 | `docs/data-flow.md` + privacy slide | lead | T-02 | todo |
+| T-02 | Models, SQLite, privacy service (encrypt, mask, redact, purge) | backend | T-01 | review |
+| T-03 | Templates loader + CSV import (validate E.164, dedupe, encrypt) | backend | T-02 | review |
+| T-04 | Language bake-off (en/hi/ml/ta): TTS model, voice, latency, accuracy | voice | ElevenLabs key + consented test numbers | blocked |
+| T-05 | Mock script generation + `POST /campaigns`, edit, approve | backend | T-03 | review |
+| T-06 | `VoiceProvider` protocol + `MockProvider` + simulator | backend | T-02 | review |
+| T-07 | Mock launch/retry queue with opt-out, concurrency, and attempt limits | backend | T-06 | review |
+| T-08 | `ElevenLabsProvider`: agent config, outbound call, overrides, webhook verify, tool endpoint | voice | T-06, number | wip |
+| T-09 | Summary/calls endpoints | backend | T-07 | review |
+| T-10 | App shell + campaign list + create wizard | frontend | T-01 | review |
+| T-11 | Campaign page: cards, language chart, segment table, retry | frontend | T-09 | review |
+| T-12 | Script preview/edit UI | frontend | T-05 | review |
+| T-13 | `docs/data-flow.md` + privacy slide | lead | T-02 | review |
 | T-14 | Accuracy table per language (`evals/lang_eval.py`) | qa | T-08 | todo |
-| T-15 | Demo rehearsal, seed data, recorded backup call | qa | T-11 | todo |
+| T-15 | Demo rehearsal, seed data, runbook | qa | T-11 | wip |
 | S-01 | Follow-up campaign (reminder/update to confirmed) | backend+frontend | T-09 | todo |
 | S-02 | Call detail drawer (transcript + outcome) | frontend | T-09 | todo |
 | S-03 | Payment-reminder template, Tamil, cost/minutes | backend | T-08 | todo |
 
-Critical path: T-01 → T-02 → T-06 → T-07 → T-09 → T-11 → T-15. Start T-04 as soon as a key exists.
+Phase 1 critical path: T-01 → T-02 → T-06 → T-07 → T-09 → T-11 → T-15. Phase 2 starts with T-04 and then T-08 when provider credentials and consented numbers are available.
 Cut order if late: S-03 → S-02 → S-01 → Tamil. Never cut: real call demo, outcome capture, voicemail/no-answer + retry, dashboard by language, privacy slide.
 
 ---
@@ -346,7 +349,7 @@ Cut order if late: S-03 → S-02 → S-01 → Tamil. Never cut: real call demo, 
 | Var | Purpose |
 |---|---|
 | `PROVIDER_MODE` | `mock` \| `elevenlabs` |
-| `DATABASE_URL` | default `sqlite:///./swaram.db` |
+| `DATABASE_URL` | default `sqlite:///./data/swaram.db` |
 | `FERNET_KEY`, `HMAC_PHONE_KEY` | encryption + phone hash |
 | `ELEVENLABS_API_KEY`, `ELEVENLABS_AGENT_ID`, `ELEVENLABS_PHONE_NUMBER_ID` | voice |
 | `ELEVENLABS_WEBHOOK_SECRET`, `TOOL_SECRET` | webhook + tool auth |
@@ -357,10 +360,12 @@ Cut order if late: S-03 → S-02 → S-01 → Tamil. Never cut: real call demo, 
 
 ```bash
 docker compose up -d
-uv run pytest -q && uv run ruff check . && uv run mypy apps
-pnpm --filter web dev
-python -m scripts.seed_demo
-python -m scripts.simulate --campaign <id> --n 200
+uv run --directory apps/api --extra dev -- pytest tests -q
+uv run --directory apps/api --extra dev -- ruff check app tests
+uv run --directory apps/api --extra dev -- mypy app
+pnpm --dir apps/web dev
+docker compose exec api python -m app.seed_demo
+python scripts/simulate.py --campaign <campaign-id> --n 200
 python -m evals.lang_eval --langs en,hi,ml
 cloudflared tunnel --url http://localhost:8000
 ```
@@ -369,14 +374,14 @@ cloudflared tunnel --url http://localhost:8000
 
 ## 15. Demo (3–4 min) and acceptance
 
-1. Create workshop campaign; show scripts in ml/hi/en.
-2. One real call (or simulated if telephony isn't ready): reply by voice, then by keypad.
-3. Dashboard by language/segment.
-4. Click retry non-responders.
-5. Swap to the clinic-reminder template to show reuse. (Stretch: Follow-up reminder to confirmed.)
-6. Privacy slide: where voice, language and data processing happen.
+1. Open the seeded workshop campaign; show scripts in ml/hi/en.
+2. Create a campaign, import CSV contacts, preview/edit scripts, and approve.
+3. Simulate calls and show dashboard totals by language and segment.
+4. Retry non-responders and show attempt counts.
+5. Swap to the clinic-reminder template to show reuse.
+6. Explain the phase-1 mock data flow and phase-2 live voice data flow.
 
-Acceptance: mock run of 200 calls fills dashboard; ≥1 real call each in en/hi/ml; accuracy table per language ready; no phone numbers in logs (grep test).
+Phase 1 acceptance: mock run of 200 contacts fills the dashboard; CSV validation, phone masking, encryption, opt-out, retry limits, and campaign erasure are covered. Phase 2 acceptance: ≥1 consented real call each in en/hi/ml and an accuracy/latency table per language; no phone numbers in logs (grep test). Provider adapter and signed endpoints are implemented; live acceptance remains blocked until credentials, agent, imported number, and consented test contacts are configured.
 
 ---
 
@@ -412,3 +417,7 @@ Acceptance: mock run of 200 calls fills dashboard; ≥1 real call each in en/hi/
 | 2026-10-09 | lead | v1 created (event-lifecycle design) |
 | 2026-10-09 | lead | v2: merged team's simple flow, campaign-centric, removed Temporal/Redis/MinIO/pgvector/RLS/Presidio/bandit/lifecycle, added Parked list, cut roster and tasks |
 | 2026-10-09 | lead | v3: added the API and dashboard scaffold, Compose, env example, CI, and local setup docs; T-01 complete |
+| 2026-10-09 | lead | Added standing rule: leave README.md unchanged unless explicitly requested |
+| 2026-10-09 | lead | v4: implemented phase-1 campaign workflow, encrypted SQLite contacts, mock scripts/provider, simulation/retry dashboard, seed demo, privacy/data-flow notes; real calling is phase 2 |
+| 2026-10-09 | lead | Source syntax, Compose config, and JSON manifests checked. Runtime tests/build pending because PyPI and npm registry connections are blocked in the current environment; phase-1 tasks marked review |
+| 2026-10-09 | lead | v5: added ElevenLabs native Twilio outbound adapter with language/prompt overrides, persistent conversation IDs, authenticated outcome tool, signed post-call webhook handling, live-calling setup and data-flow docs; default stays mock |

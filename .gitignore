@@ -6,6 +6,9 @@ __pycache__/
 *.py[cod]
 *.db
 *.sqlite3
+*.key
+data/
+apps/api/data/
 .next/
 node_modules/
 dist/
@@ -13,4 +16,5 @@ coverage/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.uv-cache/
 *.log
