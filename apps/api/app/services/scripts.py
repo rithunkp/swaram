@@ -25,6 +25,25 @@ class GeneratedScript(BaseModel):
     key_points: str = Field(default="", max_length=3000)
 
 
+SCRIPT_RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "campaign_call_script",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "first_message": {"type": "string"},
+                "voicemail_message": {"type": "string"},
+                "key_points": {"type": "string"},
+            },
+            "required": ["first_message", "voicemail_message", "key_points"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+
 class ScriptGenerationError(RuntimeError):
     pass
 
@@ -148,23 +167,37 @@ class HuggingFaceScriptGenerator:
             "Keep the opening concise and polite. Preserve the event facts accurately, do not "
             "invent details, and ask the approved question. For a custom_message campaign, "
             "preserve the organizer's intended message and translate it faithfully. The voicemail must be brief and "
-            "must not disclose personal contact details. Return only one JSON object with string "
-            "keys first_message, voicemail_message, and key_points. key_points must contain only "
+            "must not disclose personal contact details. Return the required JSON object with string "
+            "fields first_message, voicemail_message, and key_points, without markdown or commentary. "
+            "key_points must contain only "
             "facts supplied in campaign_facts.\n\n"
             f"Campaign input:\n{prompt_data}"
         )
         for attempt in range(2):
             try:
+                request_body = {
+                    "model": self.model,
+                    "max_tokens": 1600,
+                    "temperature": 0.2,
+                    "reasoning_effort": "low",
+                    "response_format": SCRIPT_RESPONSE_FORMAT,
+                    "messages": [{"role": "user", "content": user_message}],
+                }
                 response = await self.client.post(
                     "/chat/completions",
                     headers=self.headers,
-                    json={
-                        "model": self.model,
-                        "max_tokens": 1000,
-                        "temperature": 0.2,
-                        "messages": [{"role": "user", "content": user_message}],
-                    },
+                    json=request_body,
                 )
+                # Some provider/model combinations do not accept constrained output or
+                # reasoning controls. Retry without those optional parameters, then validate.
+                if response.status_code == 400:
+                    request_body.pop("response_format")
+                    request_body.pop("reasoning_effort")
+                    response = await self.client.post(
+                        "/chat/completions",
+                        headers=self.headers,
+                        json=request_body,
+                    )
                 response.raise_for_status()
                 body = response.json()
                 if not isinstance(body, dict):
@@ -172,7 +205,8 @@ class HuggingFaceScriptGenerator:
                 choices = body.get("choices", [])
                 if not isinstance(choices, list) or not choices:
                     raise ValueError("Unexpected Hugging Face response choices")
-                message = choices[0].get("message", {})
+                choice = choices[0]
+                message = choice.get("message", {}) if isinstance(choice, dict) else {}
                 text = message.get("content", "") if isinstance(message, dict) else ""
                 if not isinstance(text, str) or not text.strip():
                     raise ValueError("Hugging Face returned an empty script")
@@ -212,6 +246,13 @@ class HuggingFaceScriptGenerator:
                 if attempt == 1:
                     raise ScriptGenerationError("Could not generate a valid script") from exc
             except (ValueError, ValidationError) as exc:
+                if attempt == 0:
+                    user_message += (
+                        "\nThe prior response did not match the required fields. Return one valid "
+                        "JSON object with non-empty string first_message and voicemail_message, "
+                        "and a string key_points. Do not include markdown or commentary."
+                    )
+                    continue
                 raise ScriptGenerationError("Hugging Face returned an invalid script") from exc
         raise ScriptGenerationError("Could not generate a valid script")
 
