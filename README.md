@@ -18,10 +18,10 @@ The official project submission repository for **DEFINE 4.0 — The World's Real
 
 | Name | Role | GitHub | LinkedIn |
 |------|------|--------|----------|
-| Rithun K P | AI/ML, Voice Pipeline | [@username](https://github.com/rithunkp) | [Profile](https://linkedin.com/in/rithun-kp) |
-| Ajmal M | Role | [@username](https://github.com/24f2004489) | [Profile](https://linkedin.com/in/username) |
-| Muhammad Shifas | Role | [@username](https://github.com/msnk-dev) | [Profile](https://linkedin.com/in/username) |
-| Hareesh V | Role | [@username](https://github.com/hv2337) | [Profile](https://linkedin.com/in/username) |
+| Rithun K P | AI/ML, Voice Pipeline | [@rithunkp](https://github.com/rithunkp) | [Profile](https://linkedin.com/in/rithun-kp) |
+| Ajmal M | Role | [@24f2004489](https://github.com/24f2004489) | [Profile](https://linkedin.com/in/ajmal-m-282670284) |
+| Muhammad Shifas | Role | [@msnk-dev](https://github.com/msnk-dev) | [Profile](https://linkedin.com/in/muhammed-shifas-nk-62601a409) |
+| Hareesh V | Role | [@hv2337](https://github.com/hv2337) | [Profile](https://linkedin.com/in/hareesh2337v) |
 
 ---
 
@@ -52,7 +52,6 @@ Swaram turns an **event** into a campaign. The organiser uploads contacts and pi
 
 [Watch Project Demo](https://www.youtube.com/watch?v=VIDEO_ID)
 
-> Replace `VIDEO_ID` with your YouTube video ID.
 
 ### Screenshots
 
@@ -78,13 +77,13 @@ Swaram turns an **event** into a campaign. The organiser uploads contacts and pi
 
 | Category | Technologies |
 |----------|--------------|
-| **Frontend** | Technologies |
-| **Backend** | Technologies |
-| **Database** | Technologies |
-| **APIs / Services** | Technologies |
-| **AI / ML** | Technologies |
-| **DevOps / Deployment** | Technologies |
-| **Other Tools** | Technologies |
+| **Frontend** | Next.js 15, React 19, TypeScript |
+| **Backend** | Python 3.12, FastAPI, Uvicorn |
+| **Database** | SQLite, SQLAlchemy |
+| **APIs / Services** | ElevenLabs voice API, Exotel, HTTPX |
+| **AI / ML** | ElevenLabs voice agent; Hugging Face model support for supervisor analysis |
+| **DevOps / Deployment** | Docker, Docker Compose |
+| **Other Tools** | Pydantic Settings, Cryptography, pytest, Ruff, mypy |
 
 ## System Architecture
 
@@ -94,11 +93,11 @@ Swaram turns an **event** into a campaign. The organiser uploads contacts and pi
 
 ## Key Features
 
-- Feature 1
-- Feature 2
-- Feature 3
-- Feature 4
-- Feature 5
+- Create calling campaigns from templates and easily upload contacts.
+- Prepare scripts in English, Hindi, and Malayalam, then review and approve them before launch.
+- Simulate calls and record outcomes such as confirmed, declined, maybe, callback, or opt-out.
+- Track campaign results by language, segment, and call status; export results to CSV and retry non-responders.
+- Review campaign activity and cases requiring human review in the supervisor dashboard.
 
 ---
 
@@ -106,15 +105,62 @@ Swaram turns an **event** into a campaign. The organiser uploads contacts and pi
 
 ## Prerequisites
 
-Make sure the following are installed before running the project:
+- Git
+- Docker Desktop with Docker Compose
+- For the optional RSVP Agent Testing demo: an ElevenLabs API key and Agent ID
 
-- Requirement 1
-- Requirement 2
-- Requirement 3
+To run without Docker, install Python 3.12+, `uv`, Node.js, and npm.
 
 ## Installation
 
 ### 1. Clone the Repository
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/rithunkp/swaram.git
+
+cd swaram
+```
+
+### 2. Configure environment
+
+```bash
+cp .env.example .env
+```
+
+Set distinct values for `SUPERVISOR_READ_TOKEN` and `SUPERVISOR_ACTION_TOKEN` in `.env`. The default `PROVIDER_MODE=mock` keeps the demo from placing real calls.
+
+### 3. Start the application
+
+```bash
+docker compose up --build
+```
+
+Open [http://localhost:3000](http://localhost:3000). To stop the services, press `Ctrl+C`, then run:
+
+```bash
+docker compose down
+```
+
+Campaign data is kept in Docker volumes. To erase local campaign and supervisor data, run `docker compose down -v`.
+
+### Optional: run without Docker
+
+Start the API and supervisor in separate terminals from the repository root:
+
+```bash
+uv run --directory apps/api uvicorn app.main:app --reload --port 8000
+```
+
+```bash
+uv run --directory apps/supervisor uvicorn app.main:app --reload --port 8100
+```
+
+Then start the frontend in another terminal:
+
+```bash
+cd apps/web
+npm ci
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000). For the optional RSVP simulation, set `ELEVENLABS_API_KEY` and `ELEVENLABS_AGENT_ID` in `.env` before starting the API.
