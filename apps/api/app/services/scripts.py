@@ -48,6 +48,14 @@ def parse_json_object(text: str) -> dict[str, Any]:
 
 
 def script_copy(language: str, template_id: str, fields: Mapping[str, str]) -> tuple[str, str]:
+    if template_id == "custom_message":
+        message = fields["message"].strip()
+        question = fields["question"].strip()
+        voicemail = {
+            "hi": "जानकारी साझा करने के लिए धन्यवाद।",
+            "ml": "വിവരങ്ങൾ പങ്കുവെച്ചതിന് നന്ദി.",
+        }.get(language, "Thank you for your response.")
+        return f"{message} {question}", voicemail
     if template_id == "clinic_reminder":
         if language == "hi":
             return (
@@ -123,7 +131,9 @@ class HuggingFaceScriptGenerator:
         language_name = LANGUAGE_NAMES.get(language)
         if language_name is None:
             raise ScriptGenerationError("Unsupported language code. Choose a listed language.")
-        question = "Will you attend?" if template_id == "workshop_invite" else "Can you attend?"
+        question = fields.get("question") if template_id == "custom_message" else (
+            "Will you attend?" if template_id == "workshop_invite" else "Can you attend?"
+        )
         prompt_data = json.dumps(
             {
                 "template_id": template_id,
@@ -136,7 +146,8 @@ class HuggingFaceScriptGenerator:
         user_message = (
             "Write an outbound phone script for this campaign. Use the requested language. "
             "Keep the opening concise and polite. Preserve the event facts accurately, do not "
-            "invent details, and ask the approved question. The voicemail must be brief and "
+            "invent details, and ask the approved question. For a custom_message campaign, "
+            "preserve the organizer's intended message and translate it faithfully. The voicemail must be brief and "
             "must not disclose personal contact details. Return only one JSON object with string "
             "keys first_message, voicemail_message, and key_points. key_points must contain only "
             "facts supplied in campaign_facts.\n\n"
@@ -151,7 +162,6 @@ class HuggingFaceScriptGenerator:
                         "model": self.model,
                         "max_tokens": 1000,
                         "temperature": 0.2,
-                        "reasoning_effort": "low",
                         "messages": [{"role": "user", "content": user_message}],
                     },
                 )
@@ -171,10 +181,33 @@ class HuggingFaceScriptGenerator:
                 output["key_points"] = json.dumps(fields, ensure_ascii=False)
                 return GeneratedScript.model_validate(output)
             except httpx.HTTPStatusError as exc:
-                if exc.response.status_code != 429 and exc.response.status_code < 500:
-                    raise ScriptGenerationError("Hugging Face rejected the script request") from exc
+                status = exc.response.status_code
+                if status in {401, 403}:
+                    raise ScriptGenerationError(
+                        "Hugging Face authentication failed. Use a fresh token with Inference Providers permission."
+                    ) from exc
+                if status == 402:
+                    raise ScriptGenerationError(
+                        "Hugging Face rejected the request because inference billing or credits are unavailable."
+                    ) from exc
+                if status == 404:
+                    raise ScriptGenerationError(
+                        "Hugging Face could not route this model. Check its Inference Providers availability."
+                    ) from exc
+                if status == 429:
+                    if attempt == 1:
+                        raise ScriptGenerationError(
+                            "Hugging Face rate limit reached. Wait briefly and retry."
+                        ) from exc
+                    continue
+                if status < 500:
+                    raise ScriptGenerationError(
+                        f"Hugging Face rejected the script request (HTTP {status}). Check model/provider compatibility."
+                    ) from exc
                 if attempt == 1:
-                    raise ScriptGenerationError("Could not generate a valid script") from exc
+                    raise ScriptGenerationError(
+                        f"Hugging Face inference is temporarily unavailable (HTTP {status}). Retry shortly."
+                    ) from exc
             except httpx.HTTPError as exc:
                 if attempt == 1:
                     raise ScriptGenerationError("Could not generate a valid script") from exc

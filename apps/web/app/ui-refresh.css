@@ -91,8 +91,12 @@ h1 { font-size: clamp(30px, 3.1vw, 39px); letter-spacing: -1.35px; }
 .template-option b { font-size: 13px; }
 .template-option small { font-size: 11px; }
 .field-grid { gap: 16px; }
+.field-wide { grid-column: 1 / -1; }
 .field > span, .field-label { font-size: 12px; }
-.field input { height: 43px; border-radius: 8px; font-size: 13px; }
+.field input, .field textarea { width: 100%; border: 1px solid #dfe7e1; border-radius: 8px; background: #fff; color: #243129; font: inherit; font-size: 13px; outline: none; }
+.field input { height: 43px; padding: 0 11px; }
+.field textarea { min-height: 112px; padding: 11px; line-height: 1.55; resize: vertical; }
+.field input:focus, .field textarea:focus { border-color: #7fb498; box-shadow: 0 0 0 3px #eff7f2; }
 .check-option { padding: 9px 12px; border-radius: 8px; font-size: 12px; cursor: pointer; }
 .upload-box { min-height: 150px; border-radius: 11px; transition: background .16s, border-color .16s; }
 .upload-box:hover { background: #f5faf6; border-color: #8ab69a; }

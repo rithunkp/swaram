@@ -245,6 +245,12 @@ TEMPLATES: dict[str, TemplateSpec] = {
         "fields": ["clinic", "date", "time", "organiser"],
         "outcomes": ["confirmed", "callback", "optout"],
     },
+    "custom_message": {
+        "id": "custom_message",
+        "name": "Create your own",
+        "fields": ["campaign_name", "message", "question"],
+        "outcomes": ["confirmed", "declined", "maybe", "callback", "optout"],
+    },
 }
 FERNET: Fernet
 PHONE_HMAC_KEY: bytes
@@ -1274,9 +1280,10 @@ async def create_campaign(
     scripts_by_language: dict[str, GeneratedScript] = dict(
         zip(requested_languages, generated, strict=True)
     )
+    campaign_name = field_values.get("campaign_name") or field_values.get("topic") or field_values.get("clinic") or template["name"]
     campaign = Campaign(
         id=str(uuid.uuid4()),
-        name=str(field_values.get("topic") or field_values.get("clinic") or template["name"]),
+        name=str(campaign_name),
         template_id=template_id,
         fields=to_json(field_values),
         languages=to_json(requested_languages),
