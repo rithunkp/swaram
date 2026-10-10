@@ -1,4 +1,4 @@
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
 export type Script = { language: string; first_message: string; voicemail_message: string; key_points: string; approved: boolean };
 export type Summary = { total_contacts: number; completed_calls: number; retryable_contacts: number; outcomes: Record<string, number>; by_language: Record<string, Record<string, number>>; by_segment: Record<string, Record<string, number>> };

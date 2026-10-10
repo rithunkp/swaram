@@ -203,14 +203,17 @@ with engine.begin() as connection:
             if "tool_id" not in agent_columns:
                 connection.exec_driver_sql("ALTER TABLE demo_rsvp_agents ADD COLUMN tool_id VARCHAR(120)")
 app = FastAPI(title="Swaram API", version="0.2.0")
+cors_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3010,http://127.0.0.1:3010",
+    ).split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:3010",
-        "http://127.0.0.1:3010",
-    ],
+    allow_origins=cors_origins,
     allow_credentials=False,
     allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["Content-Type", "X-Tool-Secret"],

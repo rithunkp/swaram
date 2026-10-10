@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import "./workflow.css";
 import "./dashboard.css";
+import "./ui-refresh.css";
 
 export const metadata: Metadata = {
   title: "Swaram · Campaigns",

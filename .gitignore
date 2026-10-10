@@ -18,3 +18,4 @@ coverage/
 .ruff_cache/
 .uv-cache/
 *.log
+*.tsbuildinfo

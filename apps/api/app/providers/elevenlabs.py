@@ -84,6 +84,10 @@ class ElevenLabsProvider:
         response.raise_for_status()
         data = response.json()
         metadata = data.get("metadata") or {}
+        analysis = data.get("analysis") or {}
+        data_collection = analysis.get("data_collection_results") or {}
+        outcome_item = data_collection.get("rsvp_outcome")
+        outcome_value = outcome_item.get("value") if isinstance(outcome_item, dict) else outcome_item
         transcript = data.get("transcript")
         transcript_text = None
         if isinstance(transcript, list):
@@ -92,6 +96,7 @@ class ElevenLabsProvider:
             )
         return ConversationRecord(
             conversation_id=conversation_id,
+            outcome=outcome_value if isinstance(outcome_value, str) and outcome_value else None,
             status=str(data.get("status", "unknown")),
             duration_s=metadata.get("call_duration_secs", data.get("call_duration_secs")),
             transcript=transcript_text,
